@@ -153,7 +153,8 @@
   /* ---------- Rotlicht ---------- */
   #redveil{position:fixed;inset:0;z-index:4;pointer-events:none;background:#ff2a00;mix-blend-mode:multiply;
     opacity:0;transition:opacity .3s}
-  #hapticSwitch{position:fixed;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;z-index:2}
+  #hapticSwitch{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;z-index:2}
+  #hapticLabel{display:contents}
   #redveil.on{opacity:.55}
 
   #toast{position:fixed;left:50%;bottom:calc(var(--safe-b) + 60px);transform:translateX(-50%);
@@ -725,11 +726,20 @@ function updateSky(force){
     });
     zod.stars.geometry.attributes.position.needsUpdate = true;
     zod.stars.geometry.computeBoundingSphere();
+    const dp = zod.dotPts.geometry.attributes.position.array;
+    zod.dots.forEach((v, k) => {
+      const w = starWorld(v, R_SKY*0.965, rEQ, rHOR);
+      dp[k*3] = w.x; dp[k*3+1] = w.y; dp[k*3+2] = w.z;
+    });
+    zod.dotPts.geometry.attributes.position.needsUpdate = true;
+    zod.dotPts.geometry.computeBoundingSphere();
     const cv = new THREE.Vector3(Math.cos(zod.c.l[1]*DEG)*Math.cos(zod.c.l[0]*15*DEG),
       Math.cos(zod.c.l[1]*DEG)*Math.sin(zod.c.l[0]*15*DEG), Math.sin(zod.c.l[1]*DEG));
     const ch = Astronomy.RotateVector(rHOR, Astronomy.RotateVector(rEQ, cv));
+    const ah = Astronomy.RotateVector(rHOR, Astronomy.RotateVector(rEQ, starVecJ2000[zod.anchor]));
     const chz = Astronomy.HorizonFromVector(ch, 'normal');
-    zod.az = chz.lon; zod.alt = chz.lat;
+    const ahz = Astronomy.HorizonFromVector(ah, 'normal');
+    zod.az = ahz.lon; zod.alt = ahz.lat;
     const cw = horToWorld(ch).multiplyScalar(R_SKY*0.93);
     zod.label.position.copy(cw);
     zod.label.scale.set(34*zod.label.userData.aspect, 34, 1);
@@ -886,11 +896,12 @@ function updateGuide(){
   $('#arrowWrap').style.display = 'grid';
   const dAz = wrap180(o.az - state.heading);
   const dAlt = o.alt - state.pitch;
-  const near = Math.abs(dAz) < 8 && Math.abs(dAlt) < 8;
+  const lim = state.target && state.target.startsWith('zod:') ? 14 : 8;
+  const near = Math.abs(dAz) < lim && Math.abs(dAlt) < lim;
   $('#guide').classList.toggle('hit', near);
   // einmalig beim Erreichen, mit Hysterese gegen Dauerfeuer
   if (near && !state.found){ state.found = true; haptic(); }
-  else if (!near && state.found && (Math.abs(dAz) > 12 || Math.abs(dAlt) > 12)) state.found = false;
+  else if (!near && state.found && (Math.abs(dAz) > lim + 4 || Math.abs(dAlt) > lim + 4)) state.found = false;
   $('#hitDot').style.display = near ? 'block' : 'none';
   $('#arrowSvg').style.display = near ? 'none' : 'block';
 
@@ -926,6 +937,7 @@ function haptic(){
   try{ if (navigator.vibrate) navigator.vibrate(35); }catch(e){}
   // iOS-Safari hat keine Vibration-API: kurzer Schalter-Klick löst den Taptic Engine aus
   try{ const cb = $('#hapticSwitch'); cb.checked = !cb.checked; cb.click(); }catch(e){}
+  try{ $('#hapticLabel').click(); }catch(e){}
   tick();
 }
 
@@ -955,14 +967,16 @@ const ZODIAC = [
 let zod = null;
 function clearZodiac(){
   if (!zod) return;
-  skyGroup.remove(zod.lines, zod.stars, zod.label);
-  zod.lines.geometry.dispose(); zod.stars.geometry.dispose();
+  skyGroup.remove(zod.lines, zod.stars, zod.dotPts, zod.label);
+  zod.lines.geometry.dispose(); zod.stars.geometry.dispose(); zod.dotPts.geometry.dispose();
   zod = null;
 }
 function setZodiac(z){
   clearZodiac();
   const c = SKY.cons.find(x => x.n === z.con); if (!c) return;
   const idxSet = [...new Set(c.p.flat())];
+  // Peilung auf den hellsten Stern des Zeichens, damit der Pfeil auf etwas Sichtbares zeigt
+  const anchor = idxSet.reduce((b, i) => SKY.stars[i][2] < SKY.stars[b][2] ? i : b, idxSet[0]);
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(c.p.length*6), 3));
   const lm = new THREE.LineBasicMaterial({color:0xffc46b, transparent:true, opacity:1,
@@ -970,12 +984,24 @@ function setZodiac(z){
   const lines = new THREE.LineSegments(lg, lm); lines.frustumCulled = false; lines.renderOrder = 8;
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(idxSet.length*3), 3));
-  const sm = new THREE.PointsMaterial({color:0xffe6bd, size:11, sizeAttenuation:false, transparent:true,
+  const sm = new THREE.PointsMaterial({color:0xffe6bd, size:14, sizeAttenuation:false, transparent:true,
     opacity:.95, blending:THREE.AdditiveBlending, depthWrite:false});
   const stars = new THREE.Points(sg, sm); stars.frustumCulled = false; stars.renderOrder = 9;
+  // gepunktete Verbindungslinie: dichte Zwischenpunkte, damit auch magere Zeichen klar lesbar sind
+  const dots = [];
+  c.p.forEach(([a,b]) => {
+    const va = starVecJ2000[a], vb = starVecJ2000[b];
+    const steps = Math.max(2, Math.ceil(va.angleTo(vb) * RAD / 1.1));
+    for (let k = 0; k <= steps; k++) dots.push(va.clone().lerp(vb, k/steps).normalize());
+  });
+  const dg = new THREE.BufferGeometry();
+  dg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(dots.length*3), 3));
+  const dm = new THREE.PointsMaterial({color:0xffc46b, size:5, sizeAttenuation:false, transparent:true,
+    opacity:.85, blending:THREE.AdditiveBlending, depthWrite:false});
+  const dotPts = new THREE.Points(dg, dm); dotPts.frustumCulled = false; dotPts.renderOrder = 7;
   const label = makeLabel(z.name, '#ffd9a8', 34, 800); label.material.opacity = .95;
-  skyGroup.add(lines, stars, label);
-  zod = {z, c, idxSet, lines, stars, label, az:0, alt:-90};
+  skyGroup.add(lines, stars, dotPts, label);
+  zod = {z, c, idxSet, anchor, lines, stars, dots, dotPts, label, az:0, alt:-90};
 }
 
 function renderChips(filter){
@@ -1107,7 +1133,7 @@ function applyToggles(){
   mwPoints.visible = state.show.stars;
   consLines.visible = state.show.cons;
   consLabels.forEach(l => l.obj.visible = state.show.cons && state.show.labels);
-  if (zod){ zod.lines.visible = state.show.cons; zod.stars.visible = state.show.stars;
+  if (zod){ zod.lines.visible = state.show.cons; zod.stars.visible = state.show.stars; zod.dotPts.visible = state.show.cons;
     zod.label.visible = state.show.cons && state.show.labels; }
   ground.visible = state.show.ground;
   horizonRing.visible = state.show.ground;
@@ -1141,6 +1167,16 @@ function stopCamera(){
 $('#timeSlider').oninput = e => { state.timeOffset = +e.target.value; updateSky(true); };
 $('#timeNow').onclick = () => { state.timeOffset = 0; $('#timeSlider').value = 0; updateSky(true); };
 $('#search').oninput = e => renderChips(e.target.value);
+
+/* Haptik-Trigger: Body-Inhalt in ein Label legen, jeder Tipp toggelt den Schalter */
+(function(){
+  const cb = document.getElementById('hapticSwitch');
+  const label = document.createElement('label');
+  label.id = 'hapticLabel'; label.htmlFor = 'hapticSwitch';
+  const kids = [...document.body.children].filter(el => el !== cb);
+  kids.forEach(el => label.appendChild(el));
+  document.body.appendChild(label);
+})();
 
 /* ---------------- Start ---------------- */
 function toast(msg){
