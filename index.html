@@ -67,7 +67,7 @@
   .tgl:active{transform:scale(.94)}
 
   /* ---------- Kompassband ---------- */
-  #tapeWrap{bottom:calc(var(--safe-b) + 152px);left:0;right:0;height:46px;overflow:hidden;
+  #tapeWrap{bottom:calc(var(--safe-b) + 200px);left:0;right:0;height:46px;overflow:hidden;
     mask-image:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent);
     -webkit-mask-image:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent)}
   #tape{position:absolute;top:0;height:100%;will-change:transform}
@@ -75,7 +75,7 @@
   .tick.major{height:16px;background:rgba(127,227,255,.85)}
   .tlabel{position:absolute;top:18px;font:700 12px/1 ui-monospace,Menlo,monospace;color:var(--cy);
     transform:translateX(-50%);letter-spacing:.08em}
-  #tapeCenter{position:absolute;left:50%;bottom:calc(var(--safe-b) + 152px);width:2px;height:46px;
+  #tapeCenter{position:absolute;left:50%;bottom:calc(var(--safe-b) + 200px);width:2px;height:46px;
     background:linear-gradient(180deg,transparent,var(--am),transparent);transform:translateX(-50%)}
   #targetMark{position:absolute;top:2px;width:0;height:0;border-left:6px solid transparent;
     border-right:6px solid transparent;border-top:9px solid var(--red);transform:translateX(-50%)}
@@ -88,8 +88,14 @@
   #search{margin-left:auto;flex:1;max-width:190px;background:rgba(255,255,255,.05);border:1px solid var(--bd);
     border-radius:9px;padding:7px 9px;color:var(--txt);font:500 12px/1 -apple-system;outline:none;min-width:0}
   #search::placeholder{color:#5d7488}
-  #chips{display:flex;gap:6px;overflow-x:auto;padding:0 18px 2px 0;scrollbar-width:none}
-  #chips::-webkit-scrollbar{display:none}
+  #chips,#zodiac{display:flex;gap:6px;overflow-x:auto;padding:0 18px 2px 0;scrollbar-width:none}
+  #chips::-webkit-scrollbar,#zodiac::-webkit-scrollbar{display:none}
+  .rowLabel{font:800 9px/1 -apple-system,system-ui;letter-spacing:.16em;color:var(--mut);
+    text-transform:uppercase;margin:7px 0 5px 2px}
+  .chip.zod{border-color:rgba(255,180,87,.32);color:#ffd9a8}
+  .chip.zod.sel{border-color:var(--am);background:rgba(255,180,87,.26);color:#fff0d6;font-weight:800}
+  .chip.none{font-weight:800;color:var(--mut)}
+  .chip.none.sel{border-color:var(--cy);color:var(--cy);background:rgba(127,227,255,.14)}
   .chip{flex:0 0 auto;padding:8px 11px;border-radius:11px;border:1px solid var(--bd);
     background:rgba(255,255,255,.04);font:600 12px/1 -apple-system;color:var(--txt);white-space:nowrap;cursor:pointer}
   .chip .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
@@ -99,7 +105,7 @@
   .chip.dim{opacity:.42}
 
   /* ---------- Info-Karte ---------- */
-  #info{left:10px;right:10px;bottom:calc(var(--safe-b) + 214px);max-height:32vh;overflow-y:auto;padding:12px 14px;pointer-events:auto;
+  #info{left:10px;right:10px;bottom:calc(var(--safe-b) + 262px);max-height:32vh;overflow-y:auto;padding:12px 14px;pointer-events:auto;
     display:none;max-width:520px;margin:0 auto}
   #info.show{display:block}
   #infoHead{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
@@ -204,6 +210,8 @@
     <input id="search" type="search" placeholder="Stern suchen …" autocomplete="off" spellcheck="false">
   </div>
   <div id="chips"></div>
+  <div class="rowLabel">Sternzeichen</div>
+  <div id="zodiac"></div>
   <div id="timeRow">
     <div id="timeNow">Jetzt</div>
     <input id="timeSlider" type="range" min="-12" max="12" step="0.25" value="0">
@@ -507,7 +515,7 @@ const $ = s => document.querySelector(s);
 const state = {
   lat:null, lon:null, elev:0, gps:false,
   heading:0, pitch:0, roll:0, sensor:false, compass:false,
-  calib:0, timeOffset:0, target:'betelgeuse', found:false,
+  calib:0, timeOffset:0, target:null, found:false,
   show:{planets:true,stars:true,cons:true,iss:true,labels:true,ground:true,camera:false,red:false},
   manual:false, debug:false, started:false
 };
@@ -727,6 +735,23 @@ function glowTexture(hex){
   g.fillStyle = rg; g.fillRect(0,0,128,128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
+function ringTexture(hex){
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'); const col = new THREE.Color(hex);
+  const rgb = `${Math.round(col.r*255)},${Math.round(col.g*255)},${Math.round(col.b*255)}`;
+  g.strokeStyle = `rgba(${rgb},.30)`; g.lineWidth = 18;
+  g.beginPath(); g.arc(64,64,50,0,7); g.stroke();
+  g.strokeStyle = `rgba(${rgb},1)`; g.lineWidth = 6;
+  g.beginPath(); g.arc(64,64,50,0,7); g.stroke();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const ringTex = ringTexture(0xffb457);
+function ringSprite(scale){
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:ringTex, transparent:true, depthWrite:false,
+    blending:THREE.AdditiveBlending, depthTest:false}));
+  s.scale.set(scale, scale, 1); s.renderOrder = 13; return s;
+}
+
 const glowCache = {};
 function glowSprite(hex, scale){
   const key = hex+'_'+scale;
@@ -758,9 +783,10 @@ function addObject(o){
   o.group = new THREE.Group(); o.group.visible = false; skyGroup.add(o.group);
   o.glow = glowSprite(o.color, o.id === 'betelgeuse' ? 44 : 22);
   o.core = glowSprite(0xffffff, o.id === 'betelgeuse' ? 13 : 7);
+  o.ring = ringSprite(30); o.ring.visible = false;
   o.label = makeLabel(o.name, o.id === 'betelgeuse' ? '#ffb3ad' : '#cfe9f7', 30, 700);
   o.label.material.opacity = .9;
-  o.group.add(o.glow, o.core, o.label);
+  o.group.add(o.glow, o.core, o.ring, o.label);
   o.az = 0; o.alt = -90;
   objects.push(o); objById[o.id] = o;
   return o;
@@ -853,6 +879,11 @@ function setPill(id, text, cls){
 }
 
 /* ---------------- Positionsberechnung ---------------- */
+function starWorld(v, radius, rEQ, rHOR){
+  const h = Astronomy.RotateVector(rHOR, Astronomy.RotateVector(rEQ, v));
+  return horToWorld(h).multiplyScalar(radius);
+}
+
 let lastUpdate = 0;
 function updateSky(force){
   const now = performance.now();
@@ -908,12 +939,44 @@ function updateSky(force){
     l.obj.scale.set(26*l.obj.userData.aspect, 26, 1);
   });
 
+  // hervorgehobenes Sternzeichen
+  if (zod){
+    const lp = zod.lines.geometry.attributes.position.array; let li = 0;
+    zod.c.p.forEach(([a,b]) => {
+      for (const idx of [a,b]){
+        const w = starWorld(starVecJ2000[idx], R_SKY*0.97, rEQ, rHOR);
+        lp[li++] = w.x; lp[li++] = w.y; lp[li++] = w.z;
+      }
+    });
+    zod.lines.geometry.attributes.position.needsUpdate = true;
+    zod.lines.geometry.computeBoundingSphere();
+    const sp = zod.stars.geometry.attributes.position.array;
+    zod.idxSet.forEach((idx, k) => {
+      const w = starWorld(starVecJ2000[idx], R_SKY*0.96, rEQ, rHOR);
+      sp[k*3] = w.x; sp[k*3+1] = w.y; sp[k*3+2] = w.z;
+    });
+    zod.stars.geometry.attributes.position.needsUpdate = true;
+    zod.stars.geometry.computeBoundingSphere();
+    const cv = new THREE.Vector3(Math.cos(zod.c.l[1]*DEG)*Math.cos(zod.c.l[0]*15*DEG),
+      Math.cos(zod.c.l[1]*DEG)*Math.sin(zod.c.l[0]*15*DEG), Math.sin(zod.c.l[1]*DEG));
+    const ch = Astronomy.RotateVector(rHOR, Astronomy.RotateVector(rEQ, cv));
+    const chz = Astronomy.HorizonFromVector(ch, 'normal');
+    zod.az = chz.lon; zod.alt = chz.lat;
+    const cw = horToWorld(ch).multiplyScalar(R_SKY*0.93);
+    zod.label.position.copy(cw);
+    zod.label.scale.set(34*zod.label.userData.aspect, 34, 1);
+  }
+
   // Planeten
   PLANETS.forEach(p => {
     const o = objById[p.id];
     const eq = Astronomy.Equator(Astronomy.Body[p.body], t, obs, true, true);
     const hz = Astronomy.Horizon(t, obs, eq.ra, eq.dec, 'normal');
     o.az = hz.azimuth; o.alt = hz.altitude;
+    if (zod){
+      const el = Astronomy.Ecliptic(Astronomy.GeoVector(Astronomy.Body[p.body], t, true)).elon;
+      o.inZodiac = el >= zod.z.lon && el < zod.z.lon + 30;
+    } else o.inZodiac = false;
     place(o, R_PLANET);
     o.group.visible = state.show.planets;
     if (p.id === 'moon'){
@@ -954,6 +1017,8 @@ function place(o, radius){
   o.label.position.set(0, 15, 0);
   o.label.scale.set(30*o.label.userData.aspect, 30, 1);
   const vis = o.alt > -1 ? 1 : 0.22;
+  o.ring.visible = !!o.inZodiac && !!zod && state.target && state.target.startsWith('zod:');
+  o.glow.scale.setScalar(o.inZodiac ? 32 : 22);
   o.glow.material.opacity = vis;
   o.core.material.opacity = vis;
   o.label.material.opacity = 0.9*vis;
@@ -1019,8 +1084,14 @@ const tape = $('#tape');
   tape.appendChild(frag);
 })();
 
+function guideTarget(){
+  if (!state.target) return null;
+  if (state.target.startsWith('zod:')) return zod ? {name:zod.z.name, az:zod.az, alt:zod.alt} : null;
+  return objById[state.target] || null;
+}
+
 function updateHud(){
-  const o = objById[state.target];
+  const o = guideTarget();
   const timeEl = $('#timePill');
   const d = new Date(Date.now() + state.timeOffset*3600e3);
   timeEl.textContent = d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'}) +
@@ -1033,9 +1104,16 @@ function updateHud(){
   // Kompassband
   tape.style.transform = `translateX(${innerWidth/2 - state.heading*4}px)`;
   const mark = document.querySelector('#targetMark');
-  if (mark && o) mark.style.left = (o.az*4) + 'px';
+  if (mark){ mark.style.display = o ? '' : 'none'; if (o) mark.style.left = (o.az*4) + 'px'; }
 
-  if (!o){ return; }
+  if (!o){
+    $('#guide').classList.remove('hit');
+    $('#arrowWrap').style.opacity = .3;
+    $('#guideText').textContent = 'Freier Blick';
+    $('#guideSub').textContent = `${state.heading.toFixed(0)}° · ${state.pitch.toFixed(0)}° Höhe`;
+    return;
+  }
+  $('#arrowWrap').style.opacity = 1;
   const dAz = wrap180(o.az - state.heading);
   const dAlt = o.alt - state.pitch;
   const near = Math.abs(dAz) < 9 && Math.abs(dAlt) < 9;
@@ -1056,11 +1134,54 @@ function updateHud(){
 }
 
 /* ---------------- Ziel-Auswahl ---------------- */
-const chips = $('#chips');
+const chips = $('#chips'), zodRow = $('#zodiac');
+
+const ZODIAC = [
+  {id:'widder', name:'Widder', con:'Aries', lon:0, range:'21.3.–20.4.'},
+  {id:'stier', name:'Stier', con:'Taurus', lon:30, range:'21.4.–21.5.'},
+  {id:'zwillinge', name:'Zwillinge', con:'Gemini', lon:60, range:'22.5.–21.6.'},
+  {id:'krebs', name:'Krebs', con:'Cancer', lon:90, range:'22.6.–22.7.'},
+  {id:'loewe', name:'Löwe', con:'Leo', lon:120, range:'23.7.–23.8.'},
+  {id:'jungfrau', name:'Jungfrau', con:'Virgo', lon:150, range:'24.8.–23.9.'},
+  {id:'waage', name:'Waage', con:'Libra', lon:180, range:'24.9.–23.10.'},
+  {id:'skorpion', name:'Skorpion', con:'Scorpius', lon:210, range:'24.10.–22.11.'},
+  {id:'schuetze', name:'Schütze', con:'Sagittarius', lon:240, range:'23.11.–21.12.'},
+  {id:'steinbock', name:'Steinbock', con:'Capricornus', lon:270, range:'22.12.–20.1.'},
+  {id:'wassermann', name:'Wassermann', con:'Aquarius', lon:300, range:'21.1.–19.2.'},
+  {id:'fische', name:'Fische', con:'Pisces', lon:330, range:'20.2.–20.3.'}
+];
+
+let zod = null;
+function clearZodiac(){
+  if (!zod) return;
+  skyGroup.remove(zod.lines, zod.stars, zod.label);
+  zod.lines.geometry.dispose(); zod.stars.geometry.dispose();
+  zod = null;
+}
+function setZodiac(z){
+  clearZodiac();
+  const c = SKY.cons.find(x => x.n === z.con); if (!c) return;
+  const idxSet = [...new Set(c.p.flat())];
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(c.p.length*6), 3));
+  const lm = new THREE.LineBasicMaterial({color:0xffc46b, transparent:true, opacity:1,
+    blending:THREE.AdditiveBlending, depthWrite:false});
+  const lines = new THREE.LineSegments(lg, lm); lines.frustumCulled = false; lines.renderOrder = 8;
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(idxSet.length*3), 3));
+  const sm = new THREE.PointsMaterial({color:0xffe6bd, size:11, sizeAttenuation:false, transparent:true,
+    opacity:.95, blending:THREE.AdditiveBlending, depthWrite:false});
+  const stars = new THREE.Points(sg, sm); stars.frustumCulled = false; stars.renderOrder = 9;
+  const label = makeLabel(z.name, '#ffd9a8', 34, 800); label.material.opacity = .95;
+  skyGroup.add(lines, stars, label);
+  zod = {z, c, idxSet, lines, stars, label, az:0, alt:-90};
+}
+
 function renderChips(filter){
-  chips.innerHTML = '';
+  chips.innerHTML = ''; zodRow.innerHTML = '';
   const f = (filter||'').trim().toLowerCase();
   const list = [];
+  list.push({id:null, name:'Kein Ziel', cls:'none'});
   list.push({id:'betelgeuse', name:'Betelgeuse', cls:'bet'});
   PLANETS.forEach(p => list.push({id:p.id, name:p.name, color:p.color}));
   if (state.show.iss) list.push({id:'iss', name:'ISS', color:0x7fe3ff});
@@ -1070,14 +1191,17 @@ function renderChips(filter){
     SKY.cons.filter(c => c.n.toLowerCase().includes(f)).slice(0,6)
       .forEach(c => list.push({id:'con:'+c.n, name:c.n, cls:'dim'}));
   }
-  list.forEach(item => {
+  const mk = (row, item) => {
     const b = document.createElement('div');
     b.className = 'chip ' + (item.cls||'') + (state.target === item.id ? ' sel' : '');
-    if (item.color) { const d = document.createElement('span'); d.className='dot'; d.style.background = '#'+item.color.toString(16).padStart(6,'0'); b.appendChild(d); }
+    if (item.color) { const d = document.createElement('span'); d.className='dot';
+      d.style.background = '#'+item.color.toString(16).padStart(6,'0'); b.appendChild(d); }
     b.appendChild(document.createTextNode(item.name));
     b.onclick = () => selectTarget(item.id);
-    chips.appendChild(b);
-  });
+    row.appendChild(b);
+  };
+  list.forEach(item => mk(chips, item));
+  ZODIAC.forEach(z => mk(zodRow, {id:'zod:'+z.id, name:z.name, cls:'zod'}));
 }
 
 function starObject(idx){
@@ -1091,15 +1215,24 @@ function starObject(idx){
 }
 
 function selectTarget(id){
-  state.target = id;
-  const o = objById[id] || (id.startsWith('star:') ? starObject(+id.slice(5)) : null);
+  if (id && id === state.target){ id = null; }   // erneutes Tippen = abwählen
+  state.target = id || null;
+  clearZodiac();
   renderChips($('#search').value);
+  if (!id){ $('#info').classList.remove('show'); updateHud(); return; }
+
+  if (id.startsWith('zod:')){
+    const z = ZODIAC.find(x => 'zod:'+x.id === id);
+    if (z){ setZodiac(z); showInfo(z.name, 'TIERKREISZEICHEN',
+      `Sternzeichen ${z.name} (Sonne durchläuft es ${z.range}). Linien und Sterne sind hervorgehoben; Planeten darin bekommen einen Ring.`, null); }
+    updateSky(true); return;
+  }
   if (id.startsWith('con:')){
     const c = SKY.cons.find(x => x.n === id.slice(4));
-    if (c){ showInfo(c.n, 'Sternbild', `Sternbild ${c.n}. Die Linien zeigen die klassische Figur.`, []); }
-    state.target = 'betelgeuse';
-    return;
+    if (c) showInfo(c.n, 'STERNBILD', `Sternbild ${c.n}. Die Linien zeigen die klassische Figur.`, null);
+    updateSky(true); return;
   }
+  const o = objById[id] || (id.startsWith('star:') ? starObject(+id.slice(5)) : null);
   if (!o) return;
   showInfo(o.name, o.kind === 'star' ? 'STERN' : o.kind === 'iss' ? 'RAUMSTATION' : 'PLANET', o.fact, o);
   if (id.startsWith('star:')) o.ra != null && computeStar(o);
@@ -1120,9 +1253,18 @@ function computeStar(o){
 
 /* ---------------- Info-Karte ---------------- */
 function refreshStats(){
-  const o = objById[state.target]; if (!o) return;
   const stats = $('#infoStats'); stats.innerHTML = '';
   const mk = (label, val) => { const s = document.createElement('span'); s.innerHTML = label + ' <b>' + val + '</b>'; stats.appendChild(s); };
+  if (state.target && state.target.startsWith('zod:')){
+    if (!zod) return;
+    mk('Azimut', zod.az.toFixed(0) + '°');
+    mk('Höhe', zod.alt.toFixed(0) + '°');
+    const inside = PLANETS.filter(p => objById[p.id].inZodiac).map(p => p.name);
+    mk('Planeten', inside.length ? inside.join(', ') : 'keine');
+    mk('Status', zod.alt > 0 ? 'sichtbar' : 'unter Horizont');
+    return;
+  }
+  const o = objById[state.target]; if (!o) return;
   mk('Azimut', o.az.toFixed(0) + '°');
   mk('Höhe', o.alt.toFixed(0) + '°');
   if (o.id === 'betelgeuse') mk('Distanz', '548 Lj');
@@ -1162,6 +1304,8 @@ function applyToggles(){
   mwPoints.visible = state.show.stars;
   consLines.visible = state.show.cons;
   consLabels.forEach(l => l.obj.visible = state.show.cons && state.show.labels);
+  if (zod){ zod.lines.visible = state.show.cons; zod.stars.visible = state.show.stars;
+    zod.label.visible = state.show.cons && state.show.labels; }
   ground.visible = state.show.ground;
   horizonRing.visible = state.show.ground;
   Object.values(cardinals).forEach(c => c.visible = state.show.ground);
@@ -1222,7 +1366,7 @@ async function begin(withSensors){
     setPill('gpsPill', 'GPS Fallback', 'warn');
     updateSky(true);
   }, 2600);
-  selectTarget(state.hashTarget || 'betelgeuse');
+  selectTarget(state.hashTarget || null);
   updateSky(true);
 }
 
@@ -1260,6 +1404,8 @@ function loop(){
   const pulse = 1 + 0.16*Math.sin(now/420);
   b.glow.scale.setScalar(44*pulse);
   b.core.scale.setScalar(13*pulse);
+  const rp = 30 + 6*Math.sin(now/320);
+  objects.forEach(o => { if (o.inZodiac) o.ring.scale.setScalar(rp); });
   renderer.render(scene, camera);
 }
 

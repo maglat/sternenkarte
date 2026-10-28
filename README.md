@@ -11,6 +11,8 @@ Eine einzige HTML-Datei (`index.html`), keine Server-Abhängigkeit — alle Bibl
 - **Planeten** Sonne, Mond, Merkur … Pluto — toggelbar, mit aktueller Position, Mondphase
 - **ISS** live (wheretheiss.at) mit Bahnspur
 - **Sternbilder** (88, Stellarium-Linien) und 2.620 Sterne bis 5,4 mag (HYG v3)
+- **Kein Ziel** = freier Blick ohne Peilung; Ziel erneut antippen wählt es ab
+- **Sternzeichen** als eigene Kategorie: Auswahl hebt Linien und Sterne golden hervor und markiert Planeten im Zeichen mit pulsierendem Ring
 - **Zeitregler** ±12 h, Rotlichtmodus, optionale Kamera-Durchsicht, Namens-Toggles
 - Rechnet mit astronomy-engine: Präzession, Aberration, Refraktion, wahre Sternörter
 
