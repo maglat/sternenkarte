@@ -148,6 +148,7 @@
   /* ---------- Rotlicht ---------- */
   #redveil{position:fixed;inset:0;z-index:4;pointer-events:none;background:#ff2a00;mix-blend-mode:multiply;
     opacity:0;transition:opacity .3s}
+  #hapticSwitch{position:fixed;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;z-index:2}
   #redveil.on{opacity:.55}
 
   #toast{position:fixed;left:50%;bottom:calc(var(--safe-b) + 60px);transform:translateX(-50%);
@@ -160,6 +161,7 @@
 <video id="video" playsinline muted autoplay></video>
 <canvas id="sky"></canvas>
 <div id="redveil"></div>
+<input type="checkbox" id="hapticSwitch" aria-hidden="true" tabindex="-1">
 
 <div class="hud" id="topbar">
   <div class="pill" id="gpsPill">GPS …</div>
@@ -194,6 +196,7 @@
   <div class="tgl on" data-t="labels" title="Namen">Aa</div>
   <div class="tgl on" data-t="ground" title="Horizont">▁</div>
   <div class="tgl" data-t="camera" title="Kamera">📷</div>
+  <div class="tgl on" data-t="haptic" title="Vibration">📳</div>
   <div class="tgl" data-t="red" title="Rotlicht">🔴</div>
 </div>
 
@@ -255,7 +258,7 @@ const state = {
   lat:null, lon:null, elev:0, gps:false,
   heading:0, pitch:0, roll:0, sensor:false, compass:false,
   calib:0, timeOffset:0, target:null, found:false,
-  show:{planets:true,stars:true,cons:true,iss:true,labels:true,ground:true,camera:false,red:false},
+  show:{planets:true,stars:true,cons:true,iss:true,labels:true,ground:true,camera:false,red:false,haptic:true},
   manual:false, debug:false, started:false
 };
 
@@ -880,6 +883,9 @@ function updateGuide(){
   const dAlt = o.alt - state.pitch;
   const near = Math.abs(dAz) < 8 && Math.abs(dAlt) < 8;
   $('#guide').classList.toggle('hit', near);
+  // einmalig beim Erreichen, mit Hysterese gegen Dauerfeuer
+  if (near && !state.found){ state.found = true; haptic(); }
+  else if (!near && state.found && (Math.abs(dAz) > 12 || Math.abs(dAlt) > 12)) state.found = false;
   $('#hitDot').style.display = near ? 'block' : 'none';
   $('#arrowSvg').style.display = near ? 'none' : 'block';
 
@@ -896,6 +902,28 @@ function updateGuide(){
   if (o.alt < -1) sub += ' · unter Horizont';
   setGuide(txt, sub);
 }
+let actx = null;
+function tick(){
+  try{
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine'; o.frequency.value = 900;
+    const t0 = actx.currentTime;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
+    o.connect(g).connect(actx.destination); o.start(t0); o.stop(t0 + 0.1);
+  }catch(e){}
+}
+function haptic(){
+  if (!state.show.haptic) return;
+  try{ if (navigator.vibrate) navigator.vibrate(35); }catch(e){}
+  // iOS-Safari hat keine Vibration-API: kurzer Schalter-Klick löst den Taptic Engine aus
+  try{ const cb = $('#hapticSwitch'); cb.checked = !cb.checked; cb.click(); }catch(e){}
+  tick();
+}
+
 function setGuide(t, s){
   if (t !== lastTxt){ $('#guideText').textContent = t; lastTxt = t; }
   if (s !== lastSub){ $('#guideSub').textContent = s; lastSub = s; }
@@ -985,6 +1013,7 @@ function starObject(idx){
 function selectTarget(id){
   if (id && id === state.target){ id = null; }   // erneutes Tippen = abwählen
   state.target = id || null;
+  state.found = false;
   clearZodiac();
   renderChips($('#search').value);
   updateGuide();
@@ -1117,6 +1146,7 @@ function toast(msg){
 async function begin(withSensors){
   $('#start').style.display = 'none';
   state.started = true;
+  try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); }catch(e){}
   startGeo();
   if (withSensors){
     try{
