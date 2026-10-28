@@ -592,7 +592,25 @@ canvas.addEventListener('pointermove', e => {
   targetQuat.setFromEuler(new THREE.Euler(state.pitch*DEG, -state.heading*DEG, 0, 'YXZ'));
   camera.quaternion.copy(targetQuat);
 });
-canvas.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('pointerup', e => {
+  const moved = drag ? Math.hypot(e.clientX - drag.x, e.clientY - drag.y) : 99;
+  drag = null;
+  if (moved < 8) pickObject(e.clientX, e.clientY);
+});
+
+/* Objekt antippen: nächstgelegenes Objekt im Umkreis von 6° */
+function pickObject(x, y){
+  const ndc = new THREE.Vector2((x/innerWidth)*2 - 1, -(y/innerHeight)*2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+  const dir = ray.ray.direction;
+  let best = null, bestAng = 6;
+  objects.forEach(o => {
+    if (!o.group.visible || o.alt < -2) return;
+    const ang = o.group.position.clone().normalize().angleTo(dir) * RAD;
+    if (ang < bestAng){ bestAng = ang; best = o; }
+  });
+  if (best) selectTarget(best.id);
+}
 
 /* ---------------- Geolocation ---------------- */
 let geoWatch = null;
@@ -853,13 +871,11 @@ function updateGuide(){
 
   if (!o){
     $('#guide').classList.remove('hit');
-    $('#arrowWrap').style.opacity = .3;
-    $('#hitDot').style.display = 'none';
-    $('#arrowSvg').style.display = 'block';
+    $('#arrowWrap').style.display = 'none';
     setGuide('Freier Blick', `${state.heading.toFixed(0)}° · ${state.pitch.toFixed(0)}° Höhe`);
     return;
   }
-  $('#arrowWrap').style.opacity = 1;
+  $('#arrowWrap').style.display = 'grid';
   const dAz = wrap180(o.az - state.heading);
   const dAlt = o.alt - state.pitch;
   const near = Math.abs(dAz) < 8 && Math.abs(dAlt) < 8;
@@ -971,6 +987,7 @@ function selectTarget(id){
   state.target = id || null;
   clearZodiac();
   renderChips($('#search').value);
+  updateGuide();
   if (!id){ $('#info').classList.remove('show'); updateHud(); return; }
 
   if (id.startsWith('zod:')){
