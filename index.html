@@ -807,7 +807,7 @@ function onOrientation(e){
   } else if (e.absolute) { heading = 360 - (e.alpha||0); state.compass = true; }
   else { heading = 360 - (e.alpha||0); }
   state.heading = (heading + state.calib + 360) % 360;
-  state.pitch = -tmpEuler.x * RAD;
+  state.pitch = tmpEuler.x * RAD;
   state.roll = -tmpEuler.z * RAD;
   state.sensor = true;
   targetQuat.setFromEuler(new THREE.Euler(state.pitch*DEG, -state.heading*DEG, state.roll*DEG, 'YXZ'));
