@@ -42,6 +42,8 @@
     display:flex;flex-direction:column;align-items:center;gap:6px}
   #arrowWrap{width:104px;height:104px;position:relative;display:grid;place-items:center}
   #arrowRing{position:absolute;inset:0;border-radius:50%;border:1.5px dashed rgba(127,227,255,.28)}
+  #hitDot{position:absolute;width:16px;height:16px;border-radius:50%;background:#8ef0c0;
+    box-shadow:0 0 16px 4px rgba(142,240,192,.75);display:none}
   #arrowSvg{width:74px;height:74px;
     filter:drop-shadow(0 0 10px rgba(127,227,255,.7))}
   #arrowSvg path{fill:none;stroke:var(--cy);stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
@@ -169,6 +171,7 @@
 <div class="hud" id="guide">
   <div id="arrowWrap">
     <div id="arrowRing"></div>
+    <div id="hitDot"></div>
     <svg id="arrowSvg" viewBox="0 0 100 100"><g id="arrowG"><path d="M50 20 L50 80 M50 20 L33 38 M50 20 L67 38"/></g></svg>
   </div>
   <div id="guideText">Ziel wählen</div>
@@ -552,6 +555,8 @@ const zee = new THREE.Vector3(0,0,1);
 const q0 = new THREE.Quaternion();
 const devQuat = new THREE.Quaternion();
 const targetQuat = new THREE.Quaternion();
+const yAxis = new THREE.Vector3(0,1,0);
+const tmpQ = new THREE.Quaternion();
 const tmpEuler = new THREE.Euler();
 
 function onOrientation(e){
@@ -570,10 +575,11 @@ function onOrientation(e){
   else { heading = 360 - (e.alpha||0); }
   state.heading = (heading + state.calib + 360) % 360;
   state.pitch = tmpEuler.x * RAD;
-  state.roll = -tmpEuler.z * RAD;
+  state.roll = tmpEuler.z * RAD;
   state.sensor = true;
-  targetQuat.setFromEuler(new THREE.Euler(state.pitch*DEG, -state.heading*DEG, state.roll*DEG, 'YXZ'));
-  camera.quaternion.slerp(targetQuat, 0.35);
+  // Gierwinkel auf den Kompass ziehen, Nick und Roll unverändert übernehmen
+  const delta = (-state.heading*DEG) - tmpEuler.y;
+  targetQuat.copy(devQuat).premultiply(tmpQ.setFromAxisAngle(yAxis, delta));
 }
 
 /* Manuell: Ziehen */
@@ -827,17 +833,20 @@ function guideTarget(){
 }
 
 function updateHud(){
-  const o = guideTarget();
   const timeEl = $('#timePill');
   const d = new Date(Date.now() + state.timeOffset*3600e3);
   timeEl.textContent = d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'}) +
     (state.timeOffset ? ` ${state.timeOffset > 0 ? '+' : ''}${state.timeOffset.toFixed(2)}h` : '');
   timeEl.className = 'pill' + (state.timeOffset ? ' warn' : '');
-
   setPill('compassPill', state.compass ? 'KOMPASS ✓' : (state.sensor ? 'KOMPASS ~' : 'KOMPASS –'),
     state.compass ? 'ok' : (state.sensor ? 'warn' : 'bad'));
+  updateGuide();
+}
 
-  // Kompassband
+/* Peilung: pro Frame, damit der Pfeil flüssig läuft */
+let lastTxt = '', lastSub = '';
+function updateGuide(){
+  const o = guideTarget();
   tape.style.transform = `translateX(${innerWidth/2 - state.heading*4}px)`;
   const mark = document.querySelector('#targetMark');
   if (mark){ mark.style.display = o ? '' : 'none'; if (o) mark.style.left = (o.az*4) + 'px'; }
@@ -845,28 +854,35 @@ function updateHud(){
   if (!o){
     $('#guide').classList.remove('hit');
     $('#arrowWrap').style.opacity = .3;
-    $('#guideText').textContent = 'Freier Blick';
-    $('#guideSub').textContent = `${state.heading.toFixed(0)}° · ${state.pitch.toFixed(0)}° Höhe`;
+    $('#hitDot').style.display = 'none';
+    $('#arrowSvg').style.display = 'block';
+    setGuide('Freier Blick', `${state.heading.toFixed(0)}° · ${state.pitch.toFixed(0)}° Höhe`);
     return;
   }
   $('#arrowWrap').style.opacity = 1;
   const dAz = wrap180(o.az - state.heading);
   const dAlt = o.alt - state.pitch;
-  const near = Math.abs(dAz) < 9 && Math.abs(dAlt) < 9;
+  const near = Math.abs(dAz) < 8 && Math.abs(dAlt) < 8;
   $('#guide').classList.toggle('hit', near);
-  $('#arrowG').setAttribute('transform', `rotate(${clamp(dAz, -180, 180).toFixed(1)} 50 50)`);
+  $('#hitDot').style.display = near ? 'block' : 'none';
+  $('#arrowSvg').style.display = near ? 'none' : 'block';
 
-  let txt, sub;
-  if (near){ txt = 'GEFUNDEN'; sub = `${o.name} · ${o.alt.toFixed(0)}° Höhe`; }
-  else {
-    const dir = Math.abs(dAz) < 4 ? 'geradeaus' : (dAz > 0 ? 'rechts' : 'links');
-    txt = Math.abs(dAz) < 4 ? 'Richtung passt' : `${Math.abs(dAz).toFixed(0)}° ${dir}`;
-    sub = dAlt > 6 ? `${dAlt.toFixed(0)}° höher schauen` : dAlt < -6 ? `${Math.abs(dAlt).toFixed(0)}° tiefer schauen` : `${o.name} · ${o.alt.toFixed(0)}° Höhe`;
-  }
-  $('#guideText').textContent = txt;
-  $('#guideSub').textContent = sub;
+  // Pfeil zeigt in Bildschirmrichtung: rechts = positiv, unten = negativ
+  const ang = Math.atan2(dAz, dAlt) * RAD;
+  $('#arrowG').setAttribute('transform', `rotate(${ang.toFixed(1)} 50 50)`);
 
-  if (o.alt < -1 && !near) $('#guideSub').textContent += ' · unter Horizont';
+  if (near){ setGuide('GEFUNDEN', `${o.name} · ${o.alt.toFixed(0)}° Höhe`); return; }
+  const txt = Math.abs(dAz) < 3 && Math.abs(dAlt) < 3 ? 'Richtung passt'
+    : `${Math.abs(dAz).toFixed(0)}° ${dAz > 0 ? 'rechts' : 'links'}`;
+  let sub = dAlt > 5 ? `${dAlt.toFixed(0)}° höher schauen`
+    : dAlt < -5 ? `${Math.abs(dAlt).toFixed(0)}° tiefer schauen`
+    : `${o.name} · ${o.alt.toFixed(0)}° Höhe`;
+  if (o.alt < -1) sub += ' · unter Horizont';
+  setGuide(txt, sub);
+}
+function setGuide(t, s){
+  if (t !== lastTxt){ $('#guideText').textContent = t; lastTxt = t; }
+  if (s !== lastSub){ $('#guideSub').textContent = s; lastSub = s; }
 }
 
 /* ---------------- Ziel-Auswahl ---------------- */
@@ -1133,6 +1149,8 @@ function loop(){
   mwMat.uniforms.uTime.value += dt;
   if (state.debug || state.manual){
     camera.quaternion.setFromEuler(new THREE.Euler(state.pitch*DEG, -state.heading*DEG, state.roll*DEG, 'YXZ'));
+  } else if (state.sensor){
+    camera.quaternion.slerp(targetQuat, 0.3);
   }
   if (state.started) updateSky();
   // Betelgeuse-Puls
@@ -1140,6 +1158,7 @@ function loop(){
   const pulse = 1 + 0.16*Math.sin(now/420);
   b.glow.scale.setScalar(44*pulse);
   b.core.scale.setScalar(13*pulse);
+  updateGuide();
   const rp = 30 + 6*Math.sin(now/320);
   objects.forEach(o => { if (o.inZodiac) o.ring.scale.setScalar(rp); });
   renderer.render(scene, camera);
@@ -1156,7 +1175,7 @@ applyToggles();
 renderChips('');
 updateHud();
 loop();
-window.__app = {state, objById, updateSky, selectTarget, camera, scene,
+window.__app = {state, objById, updateSky, selectTarget, camera, scene, targetQuat,
   dir: () => camera.getWorldDirection(new THREE.Vector3()).toArray().map(n => +n.toFixed(2))};
 })();
 </script>
